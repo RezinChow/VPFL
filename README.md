@@ -215,11 +215,13 @@ python main.py --dataset Cifar10_5_pat --global_rounds 50
 If you use this code in your research, please cite:
 
 ```bibtex
-@article{vpfl2024,
+@inproceedings{zhou2025variational,
   title={Variational Perturbation Personalized Federated Learning via Prior-Posterior Distance},
-  author={Your Name},
-  journal={arXiv preprint},
-  year={2024}
+  author={Zhou, Hefeng and Wang, Yuanbin and Wang, Jun and Lou, Jiong and Bao, Wugedele and Wu, Chentao and Li, Jie},
+  booktitle={ICASSP 2025-2025 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)},
+  pages={1--5},
+  year={2025},
+  organization={IEEE}
 }
 ```
 

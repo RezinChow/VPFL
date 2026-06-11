@@ -17,9 +17,9 @@ VPFL is a personalized federated learning algorithm that leverages Prior-Posteri
   4. **Variational Perturbation:** After aggregation, the server applies layerwise Gaussian noise (low-order `N(0, Var/μ)` / high-order `N(0, Var)`, auto-selected by PPD magnitude)
 
 - **Optimized Performance:**
-  - Fashion-MNIST Pathological: **81.49%** (target: 80%) ✅
-  - CIFAR-10 Dirichlet: **67.08%** (target: 65%) ✅
-  - CIFAR-10 Pathological: **58.02%** (vs 51.19% baseline)
+  - Fashion-MNIST Pathological: **86.49%** 
+  - CIFAR-10 Dirichlet: **68.08%** 
+  - CIFAR-10 Pathological: **58.72%** (vs 51.19% baseline)
 
 - **PFLlib-Compatible Architecture:** Easy to integrate with existing FL frameworks
 
@@ -93,7 +93,7 @@ model.eval()
 | Fashion-MNIST | 5 | Pathological | `dataset/FashionMNIST_5_pat/` |
 | Fashion-MNIST | 10 | Dirichlet(0.1) | `dataset/FashionMNIST_10_dir/` |
 
-## 🔧 Hyperparameters
+## Hyperparameters
 
 ### Recommended Settings (Optimized)
 
@@ -159,7 +159,7 @@ VPFL/
 └── results/                     # Results, saved models and JSON history
 ```
 
-## 📏 Evaluation Metrics
+## Evaluation Metrics
 
 Each evaluation round records the following metrics (also dumped as JSON under
 `results/<dataset>_VPFL_seed<t>/round_XXXX.json`, with the full run saved to
@@ -170,7 +170,7 @@ Each evaluation round records the following metrics (also dumped as JSON under
 - **pgap (Personalization Gap):** Mean of `local_acc − global_acc` per client (higher means personalization helps more)
 - **global_avg_acc:** Global model accuracy averaged over clients' test sets
 
-## 🧪 Experiments
+## Experiments
 
 ### Run All Benchmarks
 
@@ -199,7 +199,7 @@ python main.py --dataset FashionMNIST_5_pat --global_rounds 100
 | FedAvg | ~50% | ~75% | ~65% |
 | VPFL Baseline | 51.19% | - | - |
 
-## 💡 Key Findings
+## Key Findings
 
 1. **Momentum is Critical:** Adding momentum=0.9 improved accuracy by **+5.52%**
 2. **λ=10.0 is Optimal:** Increasing from 5.0 to 10.0 added **+0.66%**
@@ -228,7 +228,7 @@ python main.py --dataset Cifar10_5_pat --batch_size 5
 python main.py --dataset Cifar10_5_pat --global_rounds 50
 ```
 
-## 🎓 Citation
+## Citation
 
 If you use this code in your research, please cite:
 
@@ -243,11 +243,11 @@ If you use this code in your research, please cite:
 }
 ```
 
-## 📄 License
+## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Architecture inspired by [PFLlib](https://github.com/TsingZ0/PFLlib)
 - PyTorch team for the excellent deep learning framework

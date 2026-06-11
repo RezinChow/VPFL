@@ -8,7 +8,7 @@ Official implementation of **"Variational Perturbation Personalized Federated Le
 
 VPFL is a personalized federated learning algorithm that leverages Prior-Posterior Distance (PPD) to achieve better personalization in non-IID environments.
 
-## 🎯 Key Features
+## Key Features
 
 - **Core Components:**
   1. **PPD (Prior-Posterior Distance):** Measures the layerwise discrepancy between the global prior model and the local posterior model (`Γ = posterior − prior`)
@@ -206,7 +206,7 @@ python main.py --dataset FashionMNIST_5_pat --global_rounds 100
 3. **Fashion-MNIST is Easier:** Achieved 81.49% vs 58.02% on CIFAR-10
 4. **Components Work Together:** PPD-guided constrained update + distribution-aware adaptive aggregation + variational perturbation
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Dataset Not Found
 ```bash

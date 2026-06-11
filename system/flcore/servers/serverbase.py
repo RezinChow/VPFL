@@ -4,6 +4,7 @@ Base server for VPFL
 
 import torch
 import os
+import json
 import numpy as np
 import copy
 import time
@@ -42,7 +43,10 @@ class Server(object):
         self.rs_test_acc = []
         self.rs_test_loss = []
         self.rs_train_loss = []
-        
+
+        # Per-round evaluation history (dumped to JSON, see save_history)
+        self.rounds_history = []
+
         self.times = times
         self.eval_gap = args.eval_gap
         
@@ -116,34 +120,133 @@ class Server(object):
             server_param.data += client_param.data.clone() * w
     
     def test_metrics(self):
-        """Test global model"""
+        """Test all client models"""
         num_samples = []
         tot_correct = []
         tot_loss = []
-        
+
         for c in self.clients:
-            ct, ns, cl = c.test_metrics()
+            # Client returns (test_acc, test_loss, test_num)
+            ct, cl, ns = c.test_metrics()
             tot_correct.append(ct * 1.0)
-            num_samples.append(ns)
             tot_loss.append(cl * 1.0)
-        
+            num_samples.append(ns)
+
         ids = [c.id for c in self.clients]
-        
+
         return ids, num_samples, tot_correct, tot_loss
-    
+
     def evaluate(self):
-        """Evaluate global model"""
+        """
+        Evaluate client (personalized) models and the global model.
+
+        Records, per evaluation round:
+        - avg_acc / std_acc: average and std of per-client accuracy
+        - worst5_acc: 5th percentile of per-client accuracy
+        - pgap: personalization gap (local acc - global acc, averaged)
+        - global_avg_acc: global model accuracy averaged per client
+        and dumps a JSON entry under <save_folder>/<dataset>_<algo>_seed<times>/.
+        """
         stats = self.test_metrics()
-        
+
         test_acc = sum(stats[2]) * 1.0 / sum(stats[1])
         test_loss = sum(stats[3]) * 1.0 / sum(stats[1])
-        
+        accs = [a / n for a, n in zip(stats[2], stats[1])]
+
         self.rs_test_acc.append(test_acc)
         self.rs_test_loss.append(test_loss)
-        
-        print(f"Global Test Accuracy: {test_acc:.4f}, Loss: {test_loss:.4f}")
-        
+
+        print(f"Averaged Test Accuracy: {test_acc:.4f}, Loss: {test_loss:.4f}")
+        print(f"Std Test Accuracy: {np.std(accs):.4f}")
+
+        # Personalization Gap (PGap) and global model per-client accuracy:
+        # local model = c.model (post-training), global model = self.global_model
+        try:
+            pgaps = []
+            global_accs_per_client = []
+            self.global_model.eval()
+            for c in self.clients:
+                testloader = c.load_test_data()
+                local_correct, local_total = 0, 0
+                global_correct, global_total = 0, 0
+                c.model.eval()
+                with torch.no_grad():
+                    for x, y in testloader:
+                        x = x.to(self.device)
+                        y = y.to(self.device)
+                        local_correct += (c.model(x).argmax(dim=1) == y).sum().item()
+                        global_correct += (self.global_model(x).argmax(dim=1) == y).sum().item()
+                        local_total += y.size(0)
+                        global_total += y.size(0)
+                local_acc = local_correct / max(local_total, 1)
+                global_acc = global_correct / max(global_total, 1)
+                pgaps.append(local_acc - global_acc)
+                global_accs_per_client.append(global_acc)
+            pgap = float(np.mean(pgaps))
+            worst5 = float(np.percentile(accs, 5))
+            global_avg_acc = float(np.mean(global_accs_per_client))
+        except Exception as e:
+            pgap = float('nan')
+            worst5 = float(np.percentile(accs, 5))
+            global_avg_acc = float('nan')
+            global_accs_per_client = []
+            print(f"[evaluate] PGap computation skipped: {e}")
+
+        print(f"Personalization Gap: {pgap:.4f}")
+        print(f"Worst-5% Test Accuracy: {worst5:.4f}")
+        print(f"Global Model Avg Acc (per-client): {global_avg_acc:.4f}")
+
+        # Per-round history entry + JSON dump
+        round_idx = len(self.rs_test_acc) - 1
+        history_entry = {
+            "round": round_idx,
+            "avg_acc": float(test_acc),
+            "std_acc": float(np.std(accs)),
+            "worst5_acc": worst5,
+            "pgap": pgap,
+            "global_avg_acc": global_avg_acc,
+            "per_client_acc": [float(a) for a in accs],
+            "per_client_global_acc": [float(a) for a in global_accs_per_client],
+            "test_loss": float(test_loss),
+        }
+        self.rounds_history.append(history_entry)
+
+        try:
+            out_dir = self._history_dir()
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, f"round_{round_idx:04d}.json")
+            with open(out_path, "w") as f:
+                json.dump(history_entry, f, indent=2)
+        except Exception as e:
+            print(f"[evaluate] JSON dump failed: {e}")
+
         return test_acc
+
+    def _history_dir(self):
+        """Directory for per-round JSON history files."""
+        return os.path.join(
+            self.save_folder_name,
+            f"{self.dataset}_{self.algorithm}_seed{self.times}"
+        )
+
+    def save_history(self):
+        """Save the full per-round evaluation history to history.json."""
+        try:
+            out_dir = self._history_dir()
+            os.makedirs(out_dir, exist_ok=True)
+            history_path = os.path.join(out_dir, "history.json")
+            with open(history_path, "w") as f:
+                json.dump({
+                    "algorithm": self.algorithm,
+                    "dataset": self.dataset,
+                    "seed": self.times,
+                    "num_clients": self.num_clients,
+                    "global_rounds": self.global_rounds,
+                    "rounds": self.rounds_history,
+                }, f, indent=2)
+            print(f"Saved full evaluation history to {history_path}")
+        except Exception as e:
+            print(f"History save failed: {e}")
     
     def save_results(self):
         """Save training results"""

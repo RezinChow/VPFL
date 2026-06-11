@@ -10,10 +10,11 @@ VPFL is a personalized federated learning algorithm that leverages Prior-Posteri
 
 ## 🎯 Key Features
 
-- **Three Core Components:**
-  1. **PPD (Prior-Posterior Distance):** Measures the discrepancy between global and local historical models
-  2. **Constrained Update:** Guides model updates based on PPD
-  3. **Variational Perturbation:** Adds Gaussian noise based on PPD for robustness
+- **Core Components:**
+  1. **PPD (Prior-Posterior Distance):** Measures the layerwise discrepancy between the global prior model and the local posterior model (`Γ = posterior − prior`)
+  2. **PPD-Guided Constrained Update:** After local training, each client applies a constrained subtraction step with coefficient `c = 1 / (λ · min(max|Γ|))`
+  3. **Distribution-Aware Adaptive Aggregation:** The server weights clients by `α_k ∝ n_k^γ · exp(β · Sim_k)`, combining prior-posterior cosine similarity with data quantity
+  4. **Variational Perturbation:** After aggregation, the server applies layerwise Gaussian noise (low-order `N(0, Var/μ)` / high-order `N(0, Var)`, auto-selected by PPD magnitude)
 
 - **Optimized Performance:**
   - Fashion-MNIST Pathological: **81.49%** (target: 80%) ✅
@@ -99,26 +100,29 @@ model.eval()
 ```python
 VPFL_CONFIG = {
     'lambda_param': 10.0,      # PPD constraint strength
-    'mu': 3.0,                 # Perturbation layer control
-    'perturb_scale': 0.01,     # Perturbation magnitude
-    'warmup_rounds': 20,       # Warmup before PPD activation
+    'mu': 3.0,                 # Perturbation scale control
+    'beta': 2.0,               # Temperature for adaptive aggregation weighting
+    'gamma': 0.5,              # Data quantity exponent for adaptive weighting
+    'lr_decay': 1.0,           # Per-round learning rate decay (1.0 = no decay)
 }
 
-# Optimizer settings
+# Optimizer settings (set automatically inside ClientVPFL)
 optimizer = torch.optim.SGD(
     model.parameters(),
     lr=0.005,
-    momentum=0.9  # CRITICAL for best performance!
+    momentum=0.9,      # CRITICAL for best performance!
+    weight_decay=1e-4
 )
 ```
 
 ### Parameter Descriptions
 
-- **lambda_param (λ):** Controls the strength of PPD constraint. Higher values allow more personalization.
-- **mu (μ):** Controls perturbation scaling across layers.
-- **perturb_scale:** Base magnitude of Gaussian perturbation.
-- **warmup_rounds:** Number of initial rounds without PPD.
-- **momentum:** SGD momentum. **0.9 is crucial** for best performance (+5.52% improvement).
+- **lambda_param (λ):** Controls the strength of the PPD constraint `c = 1/(λ · min(max|Γ|))`. Higher values allow more personalization.
+- **mu (μ):** Controls low-order perturbation variance scaling (`Var/μ`).
+- **beta (β):** Temperature of the similarity-based aggregation weights. Larger values sharpen the weight distribution.
+- **gamma (γ):** Exponent of the data quantity factor `n_k^γ` in aggregation weights.
+- **lr_decay:** Per-round multiplicative decay applied to client learning rates (`lr_t = lr_0 · lr_decay^t`).
+- **momentum:** SGD momentum. **0.9 is crucial** for best performance (+5.52% improvement). Combined with `weight_decay=1e-4`.
 
 ## 📁 Project Structure
 
@@ -147,10 +151,24 @@ VPFL/
 │
 ├── utils/                       # Utilities
 │   ├── data_utils.py            # Data loading utilities
-│   └── result_utils.py          # Result saving utilities
+│   ├── result_utils.py          # Result saving utilities
+│   ├── ppd.py                   # Prior-Posterior Distance computation
+│   ├── perturbation.py          # Variational perturbation module
+│   └── vpfl_core.py             # Adaptive aggregation weighting
 │
-└── results/                     # Results and saved models
+└── results/                     # Results, saved models and JSON history
 ```
+
+## 📏 Evaluation Metrics
+
+Each evaluation round records the following metrics (also dumped as JSON under
+`results/<dataset>_VPFL_seed<t>/round_XXXX.json`, with the full run saved to
+`history.json`):
+
+- **avg_acc / std_acc:** Mean and standard deviation of per-client (personalized) test accuracy
+- **worst5_acc:** 5th percentile of per-client accuracy (fairness indicator, higher is better)
+- **pgap (Personalization Gap):** Mean of `local_acc − global_acc` per client (higher means personalization helps more)
+- **global_avg_acc:** Global model accuracy averaged over clients' test sets
 
 ## 🧪 Experiments
 
@@ -186,7 +204,7 @@ python main.py --dataset FashionMNIST_5_pat --global_rounds 100
 1. **Momentum is Critical:** Adding momentum=0.9 improved accuracy by **+5.52%**
 2. **λ=10.0 is Optimal:** Increasing from 5.0 to 10.0 added **+0.66%**
 3. **Fashion-MNIST is Easier:** Achieved 81.49% vs 58.02% on CIFAR-10
-4. **Three Components Work Together:** PPD + Constrained Update + Perturbation
+4. **Components Work Together:** PPD-guided constrained update + distribution-aware adaptive aggregation + variational perturbation
 
 ## 🐛 Troubleshooting
 

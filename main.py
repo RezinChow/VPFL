@@ -56,18 +56,18 @@ def parse_args():
                         help='PPD constraint strength (default: 10.0)')
     parser.add_argument('--mu', type=float, default=3.0,
                         help='Perturbation layer control (default: 3.0)')
-    parser.add_argument('--perturb_scale', type=float, default=0.01,
-                        help='Perturbation magnitude (default: 0.01)')
-    parser.add_argument('--warmup_rounds', type=int, default=20,
-                        help='Warmup before PPD activation (default: 20)')
-    parser.add_argument('--perturb_start_round', type=int, default=30,
-                        help='When to start perturbation (default: 30)')
+    parser.add_argument('--beta', type=float, default=2.0,
+                        help='Temperature for adaptive aggregation weighting (default: 2.0)')
+    parser.add_argument('--gamma', type=float, default=0.5,
+                        help='Data quantity exponent for adaptive weighting (default: 0.5)')
     
     # Training hyperparameters
     parser.add_argument('--momentum', type=float, default=0.9,
                         help='SGD momentum - CRITICAL! (default: 0.9)')
     parser.add_argument('--local_learning_rate', type=float, default=0.005,
                         help='Learning rate (default: 0.005)')
+    parser.add_argument('--lr_decay', type=float, default=1.0,
+                        help='Per-round learning rate decay factor, 1.0 = no decay (default: 1.0)')
     parser.add_argument('--batch_size', type=int, default=10,
                         help='Batch size (default: 10)')
     parser.add_argument('--local_epochs', type=int, default=2,
@@ -147,13 +147,13 @@ def main():
     print("VPFL Hyperparameters:")
     print(f"  lambda_param: {args.lambda_param}")
     print(f"  mu: {args.mu}")
-    print(f"  perturb_scale: {args.perturb_scale}")
-    print(f"  warmup_rounds: {args.warmup_rounds}")
-    print(f"  perturb_start_round: {args.perturb_start_round}")
+    print(f"  beta: {args.beta}")
+    print(f"  gamma: {args.gamma}")
     print()
     print("Training Hyperparameters:")
     print(f"  momentum: {args.momentum} (CRITICAL!)")
     print(f"  local_learning_rate: {args.local_learning_rate}")
+    print(f"  lr_decay: {args.lr_decay}")
     print(f"  batch_size: {args.batch_size}")
     print(f"  local_epochs: {args.local_epochs}")
     print(f"  global_rounds: {args.global_rounds}")

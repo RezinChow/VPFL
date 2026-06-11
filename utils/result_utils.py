@@ -25,8 +25,10 @@ def save_results(args, results, save_folder='results'):
         'vpfl_config': {
             'lambda_param': args.lambda_param,
             'mu': args.mu,
-            'perturb_scale': args.perturb_scale,
-            'warmup_rounds': args.warmup_rounds,
+            'beta': getattr(args, 'beta', None),
+            'gamma': getattr(args, 'gamma', None),
+            'momentum': getattr(args, 'momentum', None),
+            'lr_decay': getattr(args, 'lr_decay', None),
         },
         'results': {
             'test_acc': results['test_acc'],

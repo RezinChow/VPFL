@@ -1,149 +1,134 @@
 """
-VPFL client implementation
+VPFL client implementation.
+
+Implements client-side VPFL with:
+- Prior synchronization (client always continues from the received global model)
+- Standard local SGD training (momentum + weight decay)
+- Post-training Prior-Posterior Distance (PPD) guided update:
+      h_i <- h_i (-) constrained(Gamma_i)
 """
 
 import copy
-import torch
-import torch.nn as nn
-import numpy as np
 import time
+import torch
 from system.flcore.clients.clientbase import Client
+from utils.ppd import PPDCalculator
 
 
 class ClientVPFL(Client):
     """
-    VPFL client with personalized training
+    VPFL client with PPD-guided personalized updates.
+
+    Training procedure per round:
+    1. Receive global model (prior) and sync local model to it
+    2. Train locally with SGD (momentum=0.9, weight_decay=1e-4)
+    3. Compute PPD: Gamma_i = posterior - prior
+    4. Apply constrained PPD-guided update: param -= lr * constrained(Gamma_i)
     """
-    
+
     def __init__(self, args, id, train_samples, test_samples, **kwargs):
         super().__init__(args, id, train_samples, test_samples, **kwargs)
-        
+
         # VPFL specific parameters
         self.lambda_param = args.lambda_param
-        self.mu = args.mu
-        self.perturb_scale = args.perturb_scale
-        self.warmup_rounds = args.warmup_rounds
-        self.perturb_start_round = args.perturb_start_round
         self.epsilon = 1e-8
-        
-        # Historical model
-        self.history_model = copy.deepcopy(self.model)
-    
-    def compute_ppd(self, global_model, history_model):
-        """
-        Compute Prior-Posterior Distance (PPD)
-        
-        Formula: Γ = W_global - W_history
-        """
-        global_params = list(global_model.parameters())
-        history_params = list(history_model.parameters())
-        
-        ppd_list = []
-        for g_p, h_p in zip(global_params, history_params):
-            ppd = g_p.data - h_p.data
-            ppd_list.append(ppd)
-        
-        return ppd_list
-    
-    def compute_update_limit(self, ppd_list, global_round):
-        """
-        Compute update limit c
-        
-        Formula: c = (1/λ) * min(max(|Γ_i|))
-        """
-        if global_round < self.warmup_rounds:
-            return float('inf')
-        
-        max_per_layer = [torch.max(torch.abs(ppd)).item() for ppd in ppd_list]
-        min_of_max = min(max_per_layer)
-        c = min_of_max / (self.lambda_param + self.epsilon)
-        return c
-    
-    def constrained_update(self, model, ppd_list, c):
-        """
-        Constrained update based on PPD
-        
-        Formula: local = global ⊖ clamp(PPD, -c, c)
-        """
-        if c == float('inf'):
-            return
-        
-        params = list(model.parameters())
-        for param, ppd in zip(params, ppd_list):
-            constrained_ppd = torch.clamp(ppd, -c, c)
-            param.data = param.data - constrained_ppd
-    
-    def apply_perturbation(self, model, ppd_list, global_round):
-        """
-        Variational perturbation based on PPD
-        """
-        if global_round < self.perturb_start_round:
-            return
-        
-        params = list(model.parameters())
-        
-        for param, ppd in zip(params, ppd_list):
-            abs_ppd = torch.abs(ppd)
-            median_val = torch.median(abs_ppd)
-            
-            layer_var = torch.var(param.data).item()
-            layer_var = min(layer_var, 1.0)
-            
-            std = np.sqrt(layer_var + self.epsilon) * self.perturb_scale
-            base_noise = torch.randn_like(param.data) * std
-            
-            # Layered perturbation
-            low_order_mask = abs_ppd > median_val
-            high_order_mask = ~low_order_mask
-            
-            perturbation = torch.zeros_like(param.data)
-            perturbation = torch.where(low_order_mask, base_noise / self.mu, perturbation)
-            perturbation = torch.where(high_order_mask, base_noise, perturbation)
-            
-            param.data = param.data + perturbation
-    
-    def train(self, global_round=0):
-        """Train with VPFL personalization"""
-        trainloader = self.load_train_data()
-        
-        # Start from global model
-        local_model = copy.deepcopy(self.model)
-        local_model.train()
-        
-        # Compute PPD and apply constrained update
-        ppd_list = self.compute_ppd(local_model, self.history_model)
-        c = self.compute_update_limit(ppd_list, global_round)
-        self.constrained_update(local_model, ppd_list, c)
-        
-        # Apply variational perturbation
-        self.apply_perturbation(local_model, ppd_list, global_round)
-        
-        # Local training with momentum optimizer
-        optimizer = torch.optim.SGD(
-            local_model.parameters(),
+
+        # Recreate optimizer with momentum and weight decay
+        # (momentum=0.9 + weight_decay=1e-4 are critical for convergence)
+        self.optimizer = torch.optim.SGD(
+            self.model.parameters(),
             lr=self.learning_rate,
-            momentum=self.args.momentum
+            momentum=getattr(args, 'momentum', 0.9),
+            weight_decay=1e-4
         )
-        criterion = nn.CrossEntropyLoss()
-        
+
+        # PPD calculator
+        self.ppd_calculator = PPDCalculator(device=self.device)
+
+        # Prior model (global model received from server)
+        self.prior_model = None
+
+    def set_parameters(self, model):
+        """
+        Receive the global model from the server.
+
+        Stores a deep copy as the prior for PPD computation and syncs the
+        local model so training continues from the global model (prior-sync
+        fix: without this the client would train from a stale local state).
+        """
+        self.prior_model = copy.deepcopy(model)
+        super().set_parameters(model)
+
+    def train(self, global_round=0):
+        """
+        Perform local training followed by the PPD-guided update.
+        """
+        trainloader = self.load_train_data()
+        self.model.train()
+
         start_time = time.time()
-        
+
         for epoch in range(self.local_epochs):
             for x, y in trainloader:
                 x = x.to(self.device)
                 y = y.to(self.device)
-                
-                optimizer.zero_grad()
-                output = local_model(x)
-                loss = criterion(output, y)
+
+                self.optimizer.zero_grad()
+                output = self.model(x)
+                loss = self.loss(output, y)
                 loss.backward()
-                optimizer.step()
-        
-        # Update local model
-        self.model = local_model
-        
-        # Update history model
-        self.history_model = copy.deepcopy(local_model)
-        
+                self.optimizer.step()
+
+        # After training, apply the PPD-guided update
+        self._apply_ppd_update()
+
         self.train_time_cost['num_rounds'] += 1
         self.train_time_cost['total_cost'] += time.time() - start_time
+
+    def _apply_ppd_update(self):
+        """
+        Apply the PPD-guided update to the model.
+
+        h_i <- h_i (-) constrained(Gamma_i)
+
+        where Gamma_i = posterior - prior, and the constraint coefficient is
+        c = 1 / (lambda * min(max(|Gamma_i|))). Layers whose PPD exceeds c
+        are rescaled before the subtraction step.
+        """
+        if self.prior_model is None:
+            return
+
+        # Compute PPD: Gamma_i = posterior - prior
+        ppd_matrices = self.ppd_calculator.compute_ppd(
+            self.prior_model,
+            self.model
+        )
+
+        # Compute constraint coefficient
+        c = self.ppd_calculator.compute_update_constraint(
+            ppd_matrices, self.lambda_param
+        )
+
+        # Apply constrained update
+        model_params = list(self.model.parameters())
+        for param, ppd in zip(model_params, ppd_matrices):
+            # Constrain step size
+            abs_ppd = torch.abs(ppd)
+            max_abs = torch.max(abs_ppd)
+            if max_abs > c:
+                ppd = ppd * (c / (max_abs + self.epsilon))
+
+            # Update: subtract PPD ((-) operation)
+            param.data = param.data - self.learning_rate * ppd
+
+    def get_ppd(self):
+        """
+        Get the current Prior-Posterior Distance matrices.
+
+        Returns:
+            List of PPD tensors, or None if the prior model is not set
+        """
+        if self.prior_model is None:
+            return None
+
+        return self.ppd_calculator.compute_ppd(self.prior_model, self.model)

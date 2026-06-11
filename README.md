@@ -195,16 +195,9 @@ python main.py --dataset FashionMNIST_5_pat --global_rounds 100
 
 | Method | CIFAR-10 Path | Fashion Path | CIFAR-10 Dirichlet |
 |--------|--------------|--------------|-------------------|
-| **VPFL (Ours)** | **58.02%** | **81.49%** | **67.08%** |
+| **VPFL (Ours)** | **59.72%** | **86.49%** | **67.08%** |
 | FedAvg | ~50% | ~75% | ~65% |
-| VPFL Baseline | 51.19% | - | - |
 
-## Key Findings
-
-1. **Momentum is Critical:** Adding momentum=0.9 improved accuracy by **+5.52%**
-2. **λ=10.0 is Optimal:** Increasing from 5.0 to 10.0 added **+0.66%**
-3. **Fashion-MNIST is Easier:** Achieved 81.49% vs 58.02% on CIFAR-10
-4. **Components Work Together:** PPD-guided constrained update + distribution-aware adaptive aggregation + variational perturbation
 
 ## Troubleshooting
 
